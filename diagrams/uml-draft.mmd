@@ -1,0 +1,49 @@
+classDiagram
+    class Owner {
+        +str name
+        +int available_minutes
+        +dict preferences
+        +list~Pet~ pets
+        +add_pet(pet) void
+        +remove_pet(pet) void
+        +get_all_tasks() list~Task~
+    }
+
+    class Pet {
+        +str name
+        +str species
+        +str breed
+        +int age
+        +str special_needs
+        +list~Task~ tasks
+        +add_task(task) void
+        +remove_task(task) void
+        +get_tasks(status, category) list~Task~
+    }
+
+    class Task {
+        +str title
+        +str category
+        +int duration_minutes
+        +int priority
+        +str preferred_time
+        +str frequency
+        +bool completed
+        +mark_complete() void
+        +edit(**fields) void
+    }
+
+    class Scheduler {
+        +Owner owner
+        +date date
+        +list~Task~ scheduled_items
+        +list~Task~ skipped_tasks
+        +generate_plan() void
+        +explain_plan() list~str~
+        +get_summary() dict
+    }
+
+    Owner "1" *-- "1..*" Pet : has
+    Pet "1" *-- "0..*" Task : has
+    Scheduler --> Owner : uses
+    Scheduler ..> Task : schedules / skips

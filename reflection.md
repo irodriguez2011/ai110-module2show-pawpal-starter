@@ -3,6 +3,11 @@
 ## 1. System Design
 
 **a. Initial design**
+- User can create an owner profile (name, available time, preferences) and add one or more pets.
+- User can add, edit, remove and complete care tasks, each with a duration and priority.
+- User can generate a daily plan that fits their available time and prioritizes important tasks.
+- User can see why each task was scheduled or skipped.
+
 
 - Briefly describe your initial UML design.
 - What classes did you include, and what responsibilities did you assign to each?
