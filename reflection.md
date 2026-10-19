@@ -9,13 +9,22 @@
 - User can see why each task was scheduled or skipped.
 
 
-- Briefly describe your initial UML design.
-- What classes did you include, and what responsibilities did you assign to each?
+My initial UML has four classes. Ownership runs in a chain: an Owner has one or more Pets, and each Pet has its own Tasks. The Scheduler sits beside that chain and reads from it without owning anything, so the data classes stay simple and the planning logic can be tested on its own.
+
+- **Owner:** holds the person's name, daily available minutes and preferences, plus their list of pets. It adds and removes pets and collects every task across all of them.
+- **Pet:** holds profile info (name, species, breed, age, special needs) and owns its list of tasks. It adds, removes and filters tasks.
+- **Task:** represents one care activity, with a title, category, duration, priority, optional preferred time, frequency and completed status. It can be marked complete or edited.
+- **Scheduler:** takes an Owner and builds the daily plan. It generates a plan that fits the available time by priority, keeps the scheduled and skipped tasks, and explains why each was included or left out.
 
 **b. Design changes**
 
-- Did your design change during implementation?
-- If yes, describe at least one change and why you made it.
+Yes. After writing the class skeleton I reviewed it for missing relationships and logic problems, and made three changes before implementing any methods.
+
+1. **Added `pet_name` to Task.** A Task originally had no link back to its Pet. `Owner.get_all_tasks()` flattens every pet's tasks into one list, so the Scheduler could not say which pet a task was for, and two "Feed" tasks for different pets looked identical. `Pet.add_task()` now sets `pet_name`, so the plan can read "Walk Rex".
+2. **Added a `ScheduledItem` class.** `scheduled_items` and `skipped_tasks` were plain lists of Tasks, with nowhere to store a start time or the reason a task was placed or skipped. `explain_plan()` needs those reasons, so each plan entry now wraps a Task with a `start_time` and a `reason`. Skipped entries use the same class with no start time. The Scheduler now produces ScheduledItems instead of referring to Tasks directly.
+3. **Switched Task and Pet to identity comparison (`eq=False`).** Dataclasses compare every field by default, so two identical tasks count as equal. Then `list.remove(task)` could delete the wrong copy, which is likely because the same task is copied to each pet. Default dataclasses are also unhashable, so tasks could not go in sets or dict keys. Comparing by identity keeps every task distinct.
+
+I also added a note to `generate_plan()` to clear its lists before running, so calling it twice (for example, on a Streamlit rerun) does not duplicate entries. I left other issues I found, such as string times, the untyped `preferences` dict, and how `frequency` interacts with `completed`, to deal with when I implement the scheduler.
 
 ---
 

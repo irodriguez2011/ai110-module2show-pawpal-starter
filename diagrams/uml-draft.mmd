@@ -29,15 +29,22 @@ classDiagram
         +str preferred_time
         +str frequency
         +bool completed
+        +str pet_name
         +mark_complete() void
         +edit(**fields) void
+    }
+
+    class ScheduledItem {
+        +Task task
+        +str start_time
+        +str reason
     }
 
     class Scheduler {
         +Owner owner
         +date date
-        +list~Task~ scheduled_items
-        +list~Task~ skipped_tasks
+        +list~ScheduledItem~ scheduled_items
+        +list~ScheduledItem~ skipped_tasks
         +generate_plan() void
         +explain_plan() list~str~
         +get_summary() dict
@@ -46,4 +53,5 @@ classDiagram
     Owner "1" *-- "1..*" Pet : has
     Pet "1" *-- "0..*" Task : has
     Scheduler --> Owner : uses
-    Scheduler ..> Task : schedules / skips
+    Scheduler "1" *-- "0..*" ScheduledItem : produces
+    ScheduledItem --> Task : wraps
