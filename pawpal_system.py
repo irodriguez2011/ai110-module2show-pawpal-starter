@@ -38,7 +38,7 @@ class Task:
     frequency: str = "daily"  # "once", "daily" or "weekly"
     completed: bool = False
     pet_name: str = ""  # set by Pet.add_task so a plan can say "Walk Rex"
-    due_date: date = field(default_factory=date.today)  # day this occurrence is due
+    due_date: date = field(default_factory=lambda: date.today())  # day this occurrence is due
     # Back-reference set by Pet so mark_complete can add the next occurrence.
     pet: Optional[Pet] = field(default=None, repr=False, compare=False)
 
@@ -63,20 +63,21 @@ class Task:
             if not valid:
                 raise ValueError("preferred_time must look like 'HH:MM'")
 
-    def mark_complete(self) -> Optional[Task]:
+    def mark_complete(self, today: Optional[date] = None) -> Optional[Task]:
         """Mark this task as done and create the next occurrence.
 
         The new task (due one day or week later) is added to the same pet
         automatically. Returns it, or None if the task was already complete
         (so completing twice never creates duplicates) or is a one-off
-        ("once") task, which does not repeat.
+        ("once") task, which does not repeat. Pass `today` to override the
+        date used for the next occurrence, e.g. in tests.
         """
         if self.completed:
             return None
         self.completed = True
         if self.frequency == "once":
             return None
-        upcoming = self.next_occurrence()
+        upcoming = self.next_occurrence(today)
         if self.pet is not None:
             self.pet.add_task(upcoming)
         return upcoming
@@ -186,15 +187,15 @@ class Pet:
         task.pet_name = ""
         task.pet = None
 
-    def complete_task(self, task: Task) -> Optional[Task]:
+    def complete_task(self, task: Task, today: Optional[date] = None) -> Optional[Task]:
         """Mark one of this pet's tasks done; returns its next occurrence.
 
         Raises ValueError if the task isn't here. Returns None if it was
-        already complete.
+        already complete. Pass `today` to override the date, e.g. in tests.
         """
         if not any(task is existing for existing in self.tasks):
             raise ValueError("task does not belong to this pet")
-        return task.mark_complete()
+        return task.mark_complete(today)
 
     def get_tasks(
         self, status: Optional[bool] = None, category: Optional[str] = None
