@@ -5,8 +5,9 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 PRIORITY_LABELS = {1: "low", 2: "medium", 3: "high"}
-FREQUENCIES = ("daily", "weekly")
+FREQUENCIES = ("once", "daily", "weekly")
 DEFAULT_DAY_START = "08:00"
+END_OF_DAY = 24 * 60
 
 
 def _to_minutes(hhmm: str) -> int:
@@ -34,7 +35,7 @@ class Task:
     duration_minutes: int
     priority: int  # 1 = low, 2 = medium, 3 = high
     preferred_time: Optional[str] = None  # "HH:MM", e.g. "08:00"
-    frequency: str = "daily"  # "daily" or "weekly"
+    frequency: str = "daily"  # "once", "daily" or "weekly"
     completed: bool = False
     pet_name: str = ""  # set by Pet.add_task so a plan can say "Walk Rex"
     due_date: date = field(default_factory=date.today)  # day this occurrence is due
@@ -66,12 +67,15 @@ class Task:
         """Mark this task as done and create the next occurrence.
 
         The new task (due one day or week later) is added to the same pet
-        automatically. Returns it, or None if the task was already complete,
-        so completing twice never creates duplicates.
+        automatically. Returns it, or None if the task was already complete
+        (so completing twice never creates duplicates) or is a one-off
+        ("once") task, which does not repeat.
         """
         if self.completed:
             return None
         self.completed = True
+        if self.frequency == "once":
+            return None
         upcoming = self.next_occurrence()
         if self.pet is not None:
             self.pet.add_task(upcoming)
@@ -82,8 +86,10 @@ class Task:
 
         Counts from today (not the old due_date), so finishing a task late
         never creates a next occurrence that is already overdue. Pass `today`
-        to override the date, e.g. in tests.
+        to override the date, e.g. in tests. Raises ValueError for "once" tasks.
         """
+        if self.frequency == "once":
+            raise ValueError("a one-off task has no next occurrence")
         step = timedelta(days=1) if self.frequency == "daily" else timedelta(weeks=1)
         base = today or date.today()
         return Task(
@@ -132,13 +138,27 @@ class Pet:
     def __post_init__(self) -> None:
         """Tag any tasks passed to the constructor with this pet's name."""
         for task in self.tasks:  # tasks passed to the constructor
+            self._check_not_owned_elsewhere(task)
             task.pet_name = self.name
             task.pet = self
 
+    def _check_not_owned_elsewhere(self, task: Task) -> None:
+        """Raise ValueError if the task already belongs to a different pet."""
+        if task.pet is not None and task.pet is not self:
+            raise ValueError(
+                f"task '{task.title}' already belongs to {task.pet.name}; "
+                "remove it first or create a new Task for this pet"
+            )
+
     def add_task(self, task: Task) -> None:
-        """Add a care task to this pet and set task.pet_name."""
+        """Add a care task to this pet and set task.pet_name.
+
+        Raises ValueError if the task already belongs to another pet: each
+        pet needs its own Task object so they complete and recur separately.
+        """
         if any(task is existing for existing in self.tasks):
             return
+        self._check_not_owned_elsewhere(task)
         task.pet_name = self.name
         task.pet = self
         self.tasks.append(task)
@@ -290,6 +310,9 @@ class Scheduler:
         previous_end = 0
         for wanted, task in fixed:
             start = max(wanted, previous_end)
+            if start + task.duration_minutes > END_OF_DAY:
+                self.skipped_tasks.append(self._past_midnight(task, start))
+                continue
             if start == wanted:
                 note = f"scheduled at its preferred time {task.preferred_time}"
             else:
@@ -305,6 +328,9 @@ class Scheduler:
             if task.preferred_time:
                 continue
             start = self._earliest_gap(busy, task.duration_minutes, day_start)
+            if start + task.duration_minutes > END_OF_DAY:
+                self.skipped_tasks.append(self._past_midnight(task, start))
+                continue
             busy.append((start, start + task.duration_minutes))
             busy.sort()
             placed.append((start, task, "no preferred time, placed in the first free slot"))
@@ -318,6 +344,17 @@ class Scheduler:
             )
             for start, task, note in placed
         ]
+
+    @staticmethod
+    def _past_midnight(task: Task, start: int) -> ScheduledItem:
+        """Build the skipped entry for a task that would run past midnight."""
+        return ScheduledItem(
+            task,
+            reason=(
+                f"Skipped: earliest free slot starts at {_to_hhmm(start)}, so "
+                f"{task.duration_minutes} min would run past midnight."
+            ),
+        )
 
     def _due_tasks(self) -> list[Task]:
         """Pending tasks whose due_date has arrived (recurring tasks wait their turn)."""

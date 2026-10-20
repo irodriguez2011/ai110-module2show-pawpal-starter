@@ -88,19 +88,38 @@ Today's Schedule for Jordan (Sunday, October 18)
 
 ## 🧪 Testing PawPal+
 
+Run the full suite from the project root:
+
 ```bash
-# Run the full test suite:
-pytest
-
-# Run with coverage:
-pytest --cov
+python -m pytest
 ```
 
-Sample test output:
+The 75 tests in `tests/test_pawpal.py` cover:
+
+- **Sorting:** chronological order, untimed tasks last, stable order for ties, empty and single-item lists, `00:00` and `23:59`, and the input list is never modified.
+- **Recurrence:** completing a daily or weekly task creates the next occurrence on the same pet; month, year and leap-day rollovers; completing twice never duplicates; one-off (`"once"`) tasks do not repeat; overdue tasks carry over and appear once.
+- **Conflict detection:** duplicate times across pets and within one pet, one-minute overlaps, back-to-back tasks (no conflict), three-way clashes, and untimed, completed or future tasks being ignored.
+- **Scheduling:** time-budget boundaries, skipped tasks with reasons, tasks that would run past midnight, zero budget, empty owners, running `generate_plan` twice, and an invalid `day_start`.
+- **Validation and ownership:** bad durations, priorities, frequencies and times are rejected; `edit()` rolls back on error; each Task belongs to one pet, so the same object can't be added to two pets.
+
+Test output:
 
 ```
-# Paste your pytest output here
+============================= test session starts ==============================
+platform darwin -- Python 3.14.3, pytest-9.1.1, pluggy-1.7.0
+rootdir: .
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.15.1
+collected 75 items
+
+tests/test_pawpal.py ................................................... [ 68%]
+........................                                                 [100%]
+
+============================== 75 passed in 0.02s ==============================
 ```
+
+**Confidence Level: ★★★★☆ (4/5).** All 75 tests pass, and they cover the core behaviors (sorting, recurrence, conflicts) plus many failure paths. Writing the edge-case tests found a real bug (tasks pushed past midnight produced a start time of `24:30`), which is now fixed. I'm holding back one star because a few behaviors are untested or undecided: `edit(completed=True)` bypasses recurrence, a task completed late repeats from today rather than its original schedule, and the Streamlit UI has no automated tests.
 
 ## 📐 Smarter Scheduling
 

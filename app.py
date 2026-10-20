@@ -1,6 +1,6 @@
 import streamlit as st
 
-from pawpal_system import PRIORITY_LABELS, Owner, Pet, Scheduler, Task
+from pawpal_system import FREQUENCIES, PRIORITY_LABELS, Owner, Pet, Scheduler, Task
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
@@ -100,6 +100,7 @@ else:
         category = st.selectbox("Category", CATEGORIES)
     with col2:
         preferred_time = st.text_input("Preferred time (HH:MM, optional)", value="")
+        frequency = st.selectbox("Repeats", FREQUENCIES, index=FREQUENCIES.index("daily"))
 
     if st.button("Add task"):
         pet = next(p for p in owner.pets if p.name == pet_choice)
@@ -111,6 +112,7 @@ else:
                     duration_minutes=int(duration),
                     priority=PRIORITY_VALUES[priority],
                     preferred_time=preferred_time.strip() or None,
+                    frequency=frequency,
                 )
             )
         except ValueError as error:
