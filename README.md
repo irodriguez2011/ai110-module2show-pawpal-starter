@@ -176,13 +176,18 @@ Run the full suite from the project root:
 python -m pytest
 ```
 
-The 85 tests in `tests/test_pawpal.py` cover:
+The 88 tests in `tests/test_pawpal.py` cover:
 
 - **Sorting:** chronological order, untimed tasks last, stable order for ties, empty and single-item lists, `00:00` and `23:59`, and the input list is never modified.
 - **Recurrence:** completing a daily or weekly task creates the next occurrence on the same pet; late and early completion keep a weekly task on its own weekday; month, year and leap-day rollovers; completing twice never duplicates; one-off (`"once"`) tasks do not repeat; overdue tasks carry over and appear once.
 - **Conflict detection:** duplicate times across pets and within one pet, one-minute overlaps, back-to-back tasks (no conflict), three-way clashes, and untimed, completed or future tasks being ignored.
 - **Scheduling:** time-budget boundaries, skipped tasks with reasons, tasks that would run past midnight, zero budget, empty owners, running `generate_plan` twice, and an invalid `day_start`.
+- **Real-clock defaults:** with the clock frozen on a known day, a task with no `due_date`, a scheduler with no `plan_date`, and `mark_complete()` with no `today` all use today's date.
 - **Validation and ownership:** bad durations, priorities, frequencies and times are rejected; `edit()` rolls back on error and refuses `completed`, `pet` and `pet_name`; each Task belongs to one pet, so the same object can't be added to two pets.
+
+The tests are grouped into classes by behavior (`TestSorting`, `TestRecurrence`, `TestConflictDetection`, `TestPlanGeneration` and so on), with shared constants and helpers at the top of the file. Run one group with, for example, `python -m pytest tests/test_pawpal.py::TestSorting`.
+
+The suite is deterministic. Every date is fixed (`TODAY = date(2026, 10, 19)`), and `mark_complete()`, `Pet.complete_task()`, `next_occurrence()` and `Scheduler(plan_date=...)` all accept the date as a parameter. An autouse fixture also makes any call to the real `date.today()` inside the backend fail the test, so the suite gives the same result on any day, including around midnight. The few tests of the "no date given, use today" defaults freeze the clock on a known day instead (`TestDefaultsUseToday`).
 
 Test output:
 
@@ -193,15 +198,15 @@ rootdir: .
 configfile: pytest.ini
 testpaths: tests
 plugins: anyio-4.15.1
-collected 85 items
+collected 88 items
 
-tests/test_pawpal.py ................................................... [ 60%]
-..................................                                       [100%]
+tests/test_pawpal.py ................................................... [ 57%]
+.....................................                                    [100%]
 
-============================== 85 passed in 0.03s ==============================
+============================== 88 passed in 0.03s ==============================
 ```
 
-**Confidence Level: ★★★★☆ (4/5).** All 85 tests pass, and they cover the core behaviors (sorting, recurrence, conflicts) plus many failure paths. Writing the edge-case tests found a real bug (tasks pushed past midnight produced a start time of `24:30`), which is now fixed. I'm holding back one star because the Streamlit UI has no automated tests (it was only checked with Streamlit's headless runner) and the tests haven't been measured for coverage.
+**Confidence Level: ★★★★☆ (4/5).** All 88 tests pass, and they cover the core behaviors (sorting, recurrence, conflicts) plus many failure paths. Writing the edge-case tests found a real bug (tasks pushed past midnight produced a start time of `24:30`), which is now fixed. I'm holding back one star because the Streamlit UI has no automated tests (it was only checked with Streamlit's headless runner) and the tests haven't been measured for coverage.
 
 ## 📐 Smarter Scheduling
 
@@ -280,85 +285,9 @@ Start the app with `.venv/bin/python -m streamlit run app.py`. The page is one s
 
 ### Sample CLI output
 
-`python main.py` runs the same logic in the terminal. This output was produced by running it on October 19, 2026 (the dates follow the day you run it). It shows two pets, sorting and filtering, two conflict warnings, and a final plan with a moved task and a skipped task:
+`python main.py` runs the same logic in the terminal. The full output, from a real run, is in [Sample Output](#-sample-output) above. It shows two pets, sorting and filtering, two conflict warnings, and a final plan with moved and skipped tasks.
 
-```
-============================================================
-Sorting and filtering demo
-
-All tasks, in insertion order:
-  07:30  Morning walk         Mochi  done     due 2026-10-19
-  --:--  Grooming             Mochi  pending  due 2026-10-19
-  17:00  Evening walk         Mochi  pending  due 2026-10-19
-  17:00  Vet call             Mochi  pending  due 2026-10-19
-  12:30  Medication           Mochi  pending  due 2026-10-19
-  07:30  Morning walk         Mochi  pending  due 2026-10-20
-  08:15  Thyroid pill         Luna   pending  due 2026-10-19
-  18:00  Feeding              Luna   done     due 2026-10-19
-  12:30  Laser pointer play   Luna   pending  due 2026-10-19
-  --:--  Brush fur            Luna   pending  due 2026-10-19
-  18:00  Feeding              Luna   pending  due 2026-10-20
-
-All tasks, sorted by time:
-  07:30  Morning walk         Mochi  done     due 2026-10-19
-  07:30  Morning walk         Mochi  pending  due 2026-10-20
-  08:15  Thyroid pill         Luna   pending  due 2026-10-19
-  12:30  Medication           Mochi  pending  due 2026-10-19
-  12:30  Laser pointer play   Luna   pending  due 2026-10-19
-  17:00  Evening walk         Mochi  pending  due 2026-10-19
-  17:00  Vet call             Mochi  pending  due 2026-10-19
-  18:00  Feeding              Luna   done     due 2026-10-19
-  18:00  Feeding              Luna   pending  due 2026-10-20
-  --:--  Grooming             Mochi  pending  due 2026-10-19
-  --:--  Brush fur            Luna   pending  due 2026-10-19
-
-Mochi's tasks:
-  07:30  Morning walk         Mochi  done     due 2026-10-19
-  --:--  Grooming             Mochi  pending  due 2026-10-19
-  17:00  Evening walk         Mochi  pending  due 2026-10-19
-  17:00  Vet call             Mochi  pending  due 2026-10-19
-  12:30  Medication           Mochi  pending  due 2026-10-19
-  07:30  Morning walk         Mochi  pending  due 2026-10-20
-
-Pending tasks:
-  --:--  Grooming             Mochi  pending  due 2026-10-19
-  17:00  Evening walk         Mochi  pending  due 2026-10-19
-  17:00  Vet call             Mochi  pending  due 2026-10-19
-  12:30  Medication           Mochi  pending  due 2026-10-19
-  07:30  Morning walk         Mochi  pending  due 2026-10-20
-  08:15  Thyroid pill         Luna   pending  due 2026-10-19
-  12:30  Laser pointer play   Luna   pending  due 2026-10-19
-  --:--  Brush fur            Luna   pending  due 2026-10-19
-  18:00  Feeding              Luna   pending  due 2026-10-20
-
-Completed tasks:
-  07:30  Morning walk         Mochi  done     due 2026-10-19
-  18:00  Feeding              Luna   done     due 2026-10-19
-
-Luna's pending tasks, sorted:
-  08:15  Thyroid pill         Luna   pending  due 2026-10-19
-  12:30  Laser pointer play   Luna   pending  due 2026-10-19
-  18:00  Feeding              Luna   pending  due 2026-10-20
-  --:--  Brush fur            Luna   pending  due 2026-10-19
-
-Conflict check: 2 warning(s)
-  WARNING (different pets: Luna and Mochi) - same time: 'Laser pointer play' at 12:30 conflicts with 'Medication' at 12:30 (runs until 12:35).
-  WARNING (same pet: Mochi) - same time: 'Vet call' at 17:00 conflicts with 'Evening walk' at 17:00 (runs until 17:25).
-
-Today's Schedule for Jordan (Monday, October 19)
-============================================================
-07:30 - Brush fur (Luna), 10 min: Low priority; no preferred time, placed in the first free slot.
-08:15 - Thyroid pill (Luna), 5 min: High priority; scheduled at its preferred time 08:15.
-12:30 - Medication (Mochi), 5 min: High priority; scheduled at its preferred time 12:30.
-12:35 - Laser pointer play (Luna), 20 min: Medium priority; preferred time 12:30 overlapped another task, moved to 12:35.
-17:00 - Vet call (Mochi), 15 min: Medium priority; scheduled at its preferred time 17:00.
-17:15 - Evening walk (Mochi), 25 min: Medium priority; preferred time 17:00 overlapped another task, moved to 17:15.
--- - Grooming (Mochi), 45 min: Skipped: needs 45 min but only 40 of 120 min were left (low priority).
-------------------------------------------------------------
-6 scheduled, 1 skipped | 80 of 120 min used
-```
-
-Reading the output: the "done" rows with a matching "pending" row due the next day are recurrence at work. The two warnings are the conflicts found, and in the plan below them "Laser pointer play" and "Evening walk" are the tasks that were moved back to avoid them. "Grooming" is skipped because only 40 of the 120 minutes were left when its turn came.
+Reading the output: the "done" rows with a matching "pending" row due the next day are recurrence at work. The two warnings are the conflicts found, and in the plan at the end of that output "Laser pointer play" and "Evening walk" are the tasks that were moved back to avoid them. "Grooming" is skipped because only 40 of the 120 minutes were left when its turn came.
 
 ---
 
