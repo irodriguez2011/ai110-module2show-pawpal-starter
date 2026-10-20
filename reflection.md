@@ -34,8 +34,9 @@ I also added a note to `generate_plan()` to clear its lists before running, so c
 4. **Recurrence stays on its schedule.** The next occurrence now steps from the task's own due date instead of from today, so a weekly Monday task finished on Thursday comes back on Monday.
 5. **A midnight guard.** A task pushed back by an overlap could get a start time like `24:30`, so a task that would run past midnight is now skipped with a reason.
 6. **`edit()` can't bypass the rules.** It refuses `completed`, `pet` and `pet_name`, so a task can only be completed through `mark_complete()`.
+7. **Dates can be passed in.** `mark_complete()` and `Pet.complete_task()` now accept an optional `today`, like `next_occurrence()` and `Scheduler(plan_date=...)` already did. Before this, completing a task always read the real clock, so no test could pin down the date of the next occurrence.
 
-The `how frequency interacts with completed` question I had put off is answered by items 3 and 4. I also updated the UML diagram (`diagrams/uml_final.mmd`) to show these changes.
+The `how frequency interacts with completed` question I had put off is answered by items 3 and 4, and item 7 came out of the feedback I got on the tests. I also updated the UML diagram (`diagrams/uml_final.mmd`) to show these changes.
 
 ---
 
@@ -75,7 +76,7 @@ The AI assistant was most useful for four things when building and hardening the
 
 - **Reading the real code before answering.** When I asked for edge cases, it read `pawpal_system.py` and the existing tests first. The list it gave was tied to my code, for example that `edit()` could bypass recurrence, not generic scheduler advice.
 - **Running things to check its work.** It ran the test suite after every change and drove the Streamlit app with Streamlit's headless test runner to confirm the warnings and metrics appeared. When one of its own new tests failed, it worked out that the test was wrong, not the code.
-- **Writing edge-case tests that found a real bug.** A test for a chain of late tasks showed that a plan could contain a start time of `24:30`. That bug is fixed, and the suite grew from 18 tests to 85.
+- **Writing edge-case tests that found a real bug.** A test for a chain of late tasks showed that a plan could contain a start time of `24:30`. That bug is fixed, and the suite grew from 18 tests to 88.
 - **Keeping the documents in step with the code.** It updated the README, the UML diagram and the test counts whenever the code changed.
 
 The most helpful prompts asked for a prioritized list ("what are the most important edge cases to test?") and for the reasoning behind a choice ("why yellow and not red?"), because those gave me something to decide on.
@@ -104,19 +105,22 @@ I checked its work by reading the answer against the code, asking "why" until I 
 
 **a. What you tested**
 
-The suite has 85 pytest tests, written with the AI assistant and organized around the behaviors the scheduler promises:
+The suite has 88 pytest tests, written with the AI assistant and organized around the behaviors the scheduler promises:
 
 - **Sorting:** tasks come out in clock order with untimed tasks last, ties keep their original order, the input list is never changed, and the boundary times `00:00` and `23:59` work.
 - **Recurrence:** completing a daily or weekly task creates the next one on the same pet, including across month, year and leap-day boundaries. A task finished late or early stays on its own schedule, completing twice never duplicates, and one-off tasks never repeat.
 - **Conflict detection:** the same time and overlapping times are flagged across pets and within one pet, back-to-back tasks are not, a one-minute overlap is, and untimed, completed or future tasks are ignored.
 - **Scheduling:** the time budget at its exact boundary, tasks skipped with a reason, a big skipped task not blocking smaller ones, an empty owner, a zero budget, and tasks that would run past midnight.
+- **Real-clock defaults:** with the clock frozen on a known day, a task with no `due_date`, a scheduler with no `plan_date`, and `mark_complete()` with no `today` all use today's date.
 - **Failure paths:** bad durations, priorities, frequencies and times are rejected, `edit()` rolls back when a value is invalid and refuses fields the system manages, and one Task object can't belong to two pets.
 
 These mattered because the scheduler's output looks plausible even when it's wrong. A plan with a start time of `24:30` or a weekly task drifting off its day reads fine at a glance. Writing the failure-path tests also found a real bug, the `24:30` start time, which I then fixed.
 
+After feedback on the first version of the suite, I made two changes. First, several tests depended on the real `date.today()`, so they could pass one day and fail another, especially around midnight. Now every date in the suite is fixed, and a guard makes any accidental use of the real clock fail the test. The few tests that check the "use today" defaults freeze the clock on a known day instead. Second, the tests were one long flat list with imports and constants scattered partway down. I moved the shared setup to the top and grouped the tests into classes by behavior (`TestSorting`, `TestRecurrence`, `TestConflictDetection` and so on), so a reader can find a test and run one group on its own.
+
 **b. Confidence**
 
-Four out of five. All 85 tests pass, and they cover the core behaviors and many failure paths, not just the happy ones. I held back a star for three reasons: the Streamlit app has no automated tests (I only drove it with Streamlit's headless runner), I haven't measured test coverage, and the planner is greedy, so it can leave unused time that a smarter packing would fill.
+Four out of five. All 88 tests pass, and they cover the core behaviors and many failure paths, not just the happy ones. I held back a star for three reasons: the Streamlit app has no automated tests (I only drove it with Streamlit's headless runner), I haven't measured test coverage, and the planner is greedy, so it can leave unused time that a smarter packing would fill.
 
 If I had more time I would test:
 
@@ -141,7 +145,7 @@ If I had another iteration, I would improve four things:
 - **Handle overdue tasks better.** Right now an unfinished task simply carries over to the next plan. It isn't flagged as overdue, it doesn't gain priority as it ages, and a low-priority task that keeps losing the time budget could be skipped every day. I would show "overdue by 2 days" in the plan and raise the priority of tasks that keep slipping.
 - **Save the data.** Everything lives in memory, so refreshing the Streamlit page starts from an empty list. Saving owners, pets and tasks to a file or a small database would make it usable day to day.
 - **Plan more smartly.** The planner is greedy: it takes tasks in priority order until the time runs out, which is fast and predictable but can leave unused time that a better packing would fill. I would also make `detect_conflicts` return structured data instead of strings, so the app doesn't have to trim the text for display.
-- **Test the interface.** The backend has 85 tests, but the Streamlit app has none beyond a quick headless run. I would add automated tests for adding pets and tasks, filtering, and marking tasks done.
+- **Test the interface.** The backend has 88 tests, but the Streamlit app has none beyond a quick headless run. I would add automated tests for adding pets and tasks, filtering, and marking tasks done.
 
 **c. Key takeaway**
 
