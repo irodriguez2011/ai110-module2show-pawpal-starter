@@ -6,30 +6,21 @@ st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
 st.title("🐾 PawPal+")
 
-st.markdown("""
-Welcome to the PawPal+ starter app.
+st.markdown(
+    "Welcome! PawPal+ helps you keep up with your pets' care. Tell it how much "
+    "time you have today, add your pets and their tasks, and it builds a plan "
+    "that fits your day, starting with what matters most."
+)
 
-This file is intentionally thin. It gives you a working Streamlit app so you can start quickly,
-but **it does not implement the project logic**. Your job is to design the system and build it.
-
-Use this app as your interactive demo once your backend classes/functions exist.
-""")
-
-with st.expander("Scenario", expanded=True):
+with st.expander("How it works", expanded=True):
     st.markdown("""
-**PawPal+** is a pet care planning assistant. It helps a pet owner plan care tasks
-for their pet(s) based on constraints like time, priority, and preferences.
+1. **Set your time** - how many minutes you have for pet care today.
+2. **Add your pets** - and give each one the tasks it needs: walks, meals, meds, grooming.
+3. **Generate your schedule** - the highest-priority tasks go in first, and you'll
+   see why each task was scheduled or left out.
 
-You will design and implement the scheduling logic and connect it to this Streamlit UI.
-""")
-
-with st.expander("What you need to build", expanded=True):
-    st.markdown("""
-At minimum, your system should:
-- Represent pet care tasks (what needs to happen, how long it takes, priority)
-- Represent the pet and the owner (basic info and preferences)
-- Build a plan/schedule for a day that chooses and orders tasks based on constraints
-- Explain the plan (why each task was chosen and when it happens)
+Tasks can repeat daily or weekly, or happen just once. If two tasks overlap,
+PawPal+ lets you know and moves the later one to the next free slot.
 """)
 
 st.divider()
@@ -38,6 +29,31 @@ st.divider()
 PRIORITY_NAMES = PRIORITY_LABELS
 PRIORITY_VALUES = {name: value for value, name in PRIORITY_LABELS.items()}
 CATEGORIES = ["exercise", "food", "health", "grooming", "enrichment", "other"]
+
+PRIORITY_BADGES = {1: "🟢 low", 2: "🟡 medium", 3: "🔴 high"}
+
+
+def show_conflicts(scheduler: Scheduler) -> None:
+    """Show scheduler conflicts as yellow warnings, or a green all-clear.
+
+    A conflict isn't a failure (the planner moves the later task), so it is a
+    warning, not an error; red is kept for rejected input.
+    """
+    conflicts = scheduler.detect_conflicts()
+    if not conflicts:
+        if any(t.preferred_time for t in owner.get_all_tasks()):
+            st.success("No time conflicts between your tasks.")
+        return
+    count = len(conflicts)
+    st.warning(
+        f"**{count} scheduling conflict{'s' if count != 1 else ''}** - "
+        "overlapping tasks are still planned, but the later one is moved to the "
+        "next free slot. Change a preferred time to keep it where you want it.",
+        icon="⚠️",
+    )
+    for message in conflicts:
+        st.warning(message.removeprefix("WARNING "), icon="🕒")
+
 
 # The "vault": create the Owner once per browser session, then reuse it on every rerun.
 if "owner" not in st.session_state:
@@ -139,11 +155,11 @@ if all_tasks:
                     "Task": t.title,
                     "Category": t.category,
                     "Duration (min)": t.duration_minutes,
-                    "Priority": PRIORITY_NAMES[t.priority],
+                    "Priority": PRIORITY_BADGES[t.priority],
                     "Preferred time": t.preferred_time or "-",
                     "Repeats": t.frequency,
                     "Due": t.due_date.isoformat(),
-                    "Done": "yes" if t.completed else "no",
+                    "Status": "✅ done" if t.completed else "⏳ pending",
                 }
                 for t in visible
             ]
@@ -151,7 +167,7 @@ if all_tasks:
     else:
         st.info("No tasks match these filters.")
 
-    pending = owner.filter_tasks(status=False)
+    pending = Scheduler.sort_by_time(owner.filter_tasks(status=False))
     if pending:
         to_complete = st.selectbox(
             "Mark a task done",
@@ -166,8 +182,7 @@ if all_tasks:
                 st.success(f"Done! Next '{task.title}' is due {upcoming.due_date}.")
             st.rerun()
 
-    for warning in Scheduler(owner).detect_conflicts():
-        st.warning(warning)
+    show_conflicts(Scheduler(owner))
 elif owner.pets:
     st.info("No tasks yet. Add one above.")
 
@@ -184,10 +199,21 @@ if st.button("Generate schedule"):
         scheduler.generate_plan()
         summary = scheduler.get_summary()
 
-        st.success(
-            f"{summary['tasks_scheduled']} scheduled, {summary['tasks_skipped']} skipped "
-            f"| {summary['minutes_scheduled']} of {summary['available_minutes']} min used"
+        if summary["tasks_skipped"] == 0 and summary["tasks_scheduled"]:
+            st.success("Everything due today fits in your available time.")
+        elif summary["tasks_skipped"]:
+            st.warning(
+                f"{summary['tasks_skipped']} task(s) didn't fit and stay pending "
+                "for the next plan."
+            )
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Scheduled", summary["tasks_scheduled"])
+        col2.metric("Skipped", summary["tasks_skipped"])
+        col3.metric(
+            "Time used",
+            f"{summary['minutes_scheduled']} / {summary['available_minutes']} min",
         )
+        show_conflicts(scheduler)
         if scheduler.scheduled_items:
             st.table(
                 [
@@ -196,6 +222,7 @@ if st.button("Generate schedule"):
                         "Task": item.task.title,
                         "Pet": item.task.pet_name,
                         "Duration (min)": item.task.duration_minutes,
+                        "Priority": PRIORITY_BADGES[item.task.priority],
                         "Why": item.reason,
                     }
                     for item in scheduler.scheduled_items
@@ -213,3 +240,7 @@ if st.button("Generate schedule"):
                     for item in scheduler.skipped_tasks
                 ]
             )
+
+        with st.expander("Plan explanation"):
+            for line in scheduler.explain_plan():
+                st.write(f"- {line}")
