@@ -7,6 +7,7 @@ classDiagram
         +add_pet(pet) void
         +remove_pet(pet) void
         +get_all_tasks() list~Task~
+        +filter_tasks(pet_name, status, category) list~Task~
     }
 
     class Pet {
@@ -18,6 +19,7 @@ classDiagram
         +list~Task~ tasks
         +add_task(task) void
         +remove_task(task) void
+        +complete_task(task) Task
         +get_tasks(status, category) list~Task~
     }
 
@@ -30,8 +32,11 @@ classDiagram
         +str frequency
         +bool completed
         +str pet_name
-        +mark_complete() void
-        +edit(**fields) void
+        +date due_date
+        +Pet pet
+        +mark_complete() Task
+        +next_occurrence(today) Task
+        +edit(**changes) void
     }
 
     class ScheduledItem {
@@ -46,12 +51,17 @@ classDiagram
         +list~ScheduledItem~ scheduled_items
         +list~ScheduledItem~ skipped_tasks
         +generate_plan() void
+        +sort_by_time(tasks)$ list~Task~
+        +detect_conflicts() list~str~
         +explain_plan() list~str~
         +get_summary() dict
     }
 
-    Owner "1" *-- "1..*" Pet : has
+    Owner "1" *-- "0..*" Pet : has
     Pet "1" *-- "0..*" Task : has
+    Task "0..*" --> "0..1" Pet : belongs to
     Scheduler --> Owner : uses
     Scheduler "1" *-- "0..*" ScheduledItem : produces
     ScheduledItem --> Task : wraps
+
+    note for Task "One Task object per pet.<br/>Pet.add_task raises ValueError if the task<br/>already belongs to another pet."
