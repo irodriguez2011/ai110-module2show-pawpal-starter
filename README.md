@@ -359,3 +359,9 @@ Today's Schedule for Jordan (Monday, October 19)
 ```
 
 Reading the output: the "done" rows with a matching "pending" row due the next day are recurrence at work. The two warnings are the conflicts found, and in the plan below them "Laser pointer play" and "Evening walk" are the tasks that were moved back to avoid them. "Grooming" is skipped because only 40 of the 120 minutes were left when its turn came.
+
+---
+
+## 🤝 Credits
+
+Built by Isamar Rodriguez with Claude (Anthropic's AI coding assistant) as a pair-programming partner. Claude helped with the implementation, the edge-case tests, the Streamlit display, and the documentation, and Isamar made the design decisions and reviewed the work. See the AI Collaboration section of [reflection.md](reflection.md) for how the collaboration worked.
