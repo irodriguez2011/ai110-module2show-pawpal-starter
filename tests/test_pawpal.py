@@ -66,12 +66,12 @@ def test_completing_daily_task_creates_next_day_task():
 
 
 def test_completing_weekly_task_moves_a_week():
-    bath = Task("Bath", "grooming", 30, 2, frequency="weekly")
+    bath = Task("Bath", "grooming", 30, 2, frequency="weekly", due_date=date(2026, 10, 19))
     assert bath.next_occurrence(today=date(2026, 10, 19)).due_date == date(2026, 10, 26)
 
 
 def test_next_occurrence_crosses_month_boundary():
-    walk = Task("Walk", "exercise", 20, 3, frequency="daily")
+    walk = Task("Walk", "exercise", 20, 3, frequency="daily", due_date=date(2026, 10, 31))
     assert walk.next_occurrence(today=date(2026, 10, 31)).due_date == date(2026, 11, 1)
 
 
@@ -239,7 +239,7 @@ def test_daily_completion_creates_task_for_following_day():
     ],
 )
 def test_next_occurrence_calendar_boundaries(today, frequency, expected):
-    task = Task("T", "other", 5, 1, frequency=frequency)
+    task = Task("T", "other", 5, 1, frequency=frequency, due_date=today)
     assert task.next_occurrence(today=today).due_date == expected
 
 
@@ -442,7 +442,7 @@ def test_edit_unknown_field_raises():
 
 
 def test_edit_frequency_changes_next_occurrence():
-    task = Task("T", "other", 10, 2, frequency="daily")
+    task = Task("T", "other", 10, 2, frequency="daily", due_date=TODAY)
     task.edit(frequency="weekly")
     assert task.next_occurrence(today=TODAY).due_date == TODAY + timedelta(weeks=1)
 
@@ -540,3 +540,69 @@ def test_edit_can_turn_recurring_task_into_one_off():
     mochi.add_task(walk)
     walk.edit(frequency="once")
     assert walk.mark_complete() is None and len(mochi.tasks) == 1
+
+
+# Late and early completion keep the task on its own schedule
+MON, THU = date(2026, 10, 12), date(2026, 10, 15)  # a Monday and the Thursday after
+
+
+def test_weekly_task_finished_late_stays_on_its_weekday():
+    bath = Task("Bath", "grooming", 30, 2, frequency="weekly", due_date=MON)
+    assert MON.weekday() == 0
+    nxt = bath.next_occurrence(today=THU)
+    assert nxt.due_date == date(2026, 10, 19) and nxt.due_date.weekday() == 0
+
+
+def test_weekly_task_finished_many_weeks_late_lands_on_next_future_weekday():
+    bath = Task("Bath", "grooming", 30, 2, frequency="weekly", due_date=MON)
+    nxt = bath.next_occurrence(today=date(2026, 11, 4))  # a Wednesday, 3+ weeks later
+    assert nxt.due_date == date(2026, 11, 9) and nxt.due_date.weekday() == 0
+
+
+def test_next_occurrence_is_never_overdue():
+    for frequency in ("daily", "weekly"):
+        task = Task("T", "other", 5, 1, frequency=frequency, due_date=date(2020, 1, 1))
+        assert task.next_occurrence(today=TODAY).due_date > TODAY
+
+
+def test_daily_task_finished_late_comes_back_tomorrow():
+    walk = Task("Walk", "exercise", 20, 3, frequency="daily", due_date=MON)
+    assert walk.next_occurrence(today=THU).due_date == THU + timedelta(days=1)
+
+
+def test_weekly_task_finished_early_keeps_its_original_schedule():
+    bath = Task("Bath", "grooming", 30, 2, frequency="weekly", due_date=date(2026, 10, 26))
+    nxt = bath.next_occurrence(today=date(2026, 10, 22))  # done 4 days early
+    assert nxt.due_date == date(2026, 11, 2)
+
+
+def test_weekly_task_finished_on_its_due_day_comes_back_in_a_week():
+    bath = Task("Bath", "grooming", 30, 2, frequency="weekly", due_date=MON)
+    assert bath.next_occurrence(today=MON).due_date == MON + timedelta(weeks=1)
+
+
+# edit() cannot bypass recurrence or ownership
+def test_edit_cannot_set_completed_directly():
+    _, mochi, _ = _owner_with_pets()
+    walk = Task("Walk", "exercise", 20, 3)
+    mochi.add_task(walk)
+    with pytest.raises(ValueError, match="mark_complete"):
+        walk.edit(completed=True)
+    assert walk.completed is False and len(mochi.tasks) == 1
+
+
+@pytest.mark.parametrize("field_name", ["pet", "pet_name"])
+def test_edit_cannot_change_ownership_fields(field_name):
+    _, mochi, _ = _owner_with_pets()
+    walk = Task("Walk", "exercise", 20, 3)
+    mochi.add_task(walk)
+    with pytest.raises(ValueError):
+        walk.edit(**{field_name: None})
+    assert walk.pet is mochi and walk.pet_name == "Mochi"
+
+
+def test_edit_with_managed_and_valid_fields_changes_nothing():
+    walk = Task("Walk", "exercise", 20, 3)
+    with pytest.raises(ValueError):
+        walk.edit(duration_minutes=45, completed=True)
+    assert walk.duration_minutes == 20 and walk.completed is False

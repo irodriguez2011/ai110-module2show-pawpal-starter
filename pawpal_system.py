@@ -82,16 +82,24 @@ class Task:
         return upcoming
 
     def next_occurrence(self, today: Optional[date] = None) -> Task:
-        """Return a fresh, pending copy due today + 1 day (daily) or + 7 days (weekly).
+        """Return a fresh, pending copy on the task's own schedule.
 
-        Counts from today (not the old due_date), so finishing a task late
-        never creates a next occurrence that is already overdue. Pass `today`
-        to override the date, e.g. in tests. Raises ValueError for "once" tasks.
+        The next due date is one step (1 day or 7 days) after this task's
+        due_date, so a weekly Monday task stays on Mondays even if it is
+        finished on Thursday. If that date is not after today (the task was
+        finished late), keep stepping forward until it is, so the new task
+        is never created already overdue. Finishing early works the same way:
+        the next date is still one step after the original due_date. Pass
+        `today` to override the date, e.g. in tests. Raises ValueError for
+        "once" tasks.
         """
         if self.frequency == "once":
             raise ValueError("a one-off task has no next occurrence")
         step = timedelta(days=1) if self.frequency == "daily" else timedelta(weeks=1)
         base = today or date.today()
+        upcoming = self.due_date + step
+        if upcoming <= base:
+            upcoming += step * ((base - upcoming) // step + 1)
         return Task(
             title=self.title,
             category=self.category,
@@ -99,19 +107,28 @@ class Task:
             priority=self.priority,
             preferred_time=self.preferred_time,
             frequency=self.frequency,
-            due_date=base + step,
+            due_date=upcoming,
         )
 
     def edit(self, **changes) -> None:
         """Update task fields such as duration, priority or preferred_time.
 
-        Unknown field names raise AttributeError. If the new values are invalid,
-        the task is left unchanged and ValueError is raised.
+        Unknown field names raise AttributeError. Fields managed by the system
+        ("completed", "pet", "pet_name") raise ValueError: use mark_complete()
+        so recurring tasks create their next occurrence, and Pet.add_task /
+        remove_task for ownership. If the new values are invalid, the task is
+        left unchanged and ValueError is raised.
         """
         valid = {f.name for f in fields(self)}
         unknown = set(changes) - valid
         if unknown:
             raise AttributeError(f"Task has no field(s): {sorted(unknown)}")
+        managed = set(changes) & {"completed", "pet", "pet_name"}
+        if managed:
+            raise ValueError(
+                f"cannot edit {sorted(managed)} directly; use mark_complete() "
+                "or Pet.add_task / remove_task"
+            )
 
         old = {name: getattr(self, name) for name in changes}
         for name, value in changes.items():
