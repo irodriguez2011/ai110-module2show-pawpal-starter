@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 PRIORITY_LABELS = {1: "low", 2: "medium", 3: "high"}
@@ -20,6 +20,11 @@ def _to_hhmm(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
+def _time_key(task: "Task") -> int:
+    """Sort key: minutes since midnight of the preferred time, untimed tasks last."""
+    return _to_minutes(task.preferred_time) if task.preferred_time else 24 * 60
+
+
 @dataclass(eq=False)  # identity comparison: two identical tasks stay distinct
 class Task:
     """A single pet care activity (walk, feeding, meds, grooming, enrichment)."""
@@ -32,6 +37,9 @@ class Task:
     frequency: str = "daily"  # "daily" or "weekly"
     completed: bool = False
     pet_name: str = ""  # set by Pet.add_task so a plan can say "Walk Rex"
+    due_date: date = field(default_factory=date.today)  # day this occurrence is due
+    # Back-reference set by Pet so mark_complete can add the next occurrence.
+    pet: Optional[Pet] = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Validate the task's fields as soon as it is created."""
@@ -47,13 +55,46 @@ class Task:
             raise ValueError(f"frequency must be one of {FREQUENCIES}")
         if self.preferred_time is not None:
             try:
-                _to_minutes(self.preferred_time)
+                # Round-trip so "7:30" is rejected: string sorting needs zero-padding.
+                valid = _to_hhmm(_to_minutes(self.preferred_time)) == self.preferred_time
             except ValueError:
-                raise ValueError("preferred_time must look like 'HH:MM'") from None
+                valid = False
+            if not valid:
+                raise ValueError("preferred_time must look like 'HH:MM'")
 
-    def mark_complete(self) -> None:
-        """Mark this task as done."""
+    def mark_complete(self) -> Optional[Task]:
+        """Mark this task as done and create the next occurrence.
+
+        The new task (due one day or week later) is added to the same pet
+        automatically. Returns it, or None if the task was already complete,
+        so completing twice never creates duplicates.
+        """
+        if self.completed:
+            return None
         self.completed = True
+        upcoming = self.next_occurrence()
+        if self.pet is not None:
+            self.pet.add_task(upcoming)
+        return upcoming
+
+    def next_occurrence(self, today: Optional[date] = None) -> Task:
+        """Return a fresh, pending copy due today + 1 day (daily) or + 7 days (weekly).
+
+        Counts from today (not the old due_date), so finishing a task late
+        never creates a next occurrence that is already overdue. Pass `today`
+        to override the date, e.g. in tests.
+        """
+        step = timedelta(days=1) if self.frequency == "daily" else timedelta(weeks=1)
+        base = today or date.today()
+        return Task(
+            title=self.title,
+            category=self.category,
+            duration_minutes=self.duration_minutes,
+            priority=self.priority,
+            preferred_time=self.preferred_time,
+            frequency=self.frequency,
+            due_date=base + step,
+        )
 
     def edit(self, **changes) -> None:
         """Update task fields such as duration, priority or preferred_time.
@@ -92,18 +133,31 @@ class Pet:
         """Tag any tasks passed to the constructor with this pet's name."""
         for task in self.tasks:  # tasks passed to the constructor
             task.pet_name = self.name
+            task.pet = self
 
     def add_task(self, task: Task) -> None:
         """Add a care task to this pet and set task.pet_name."""
         if any(task is existing for existing in self.tasks):
             return
         task.pet_name = self.name
+        task.pet = self
         self.tasks.append(task)
 
     def remove_task(self, task: Task) -> None:
         """Remove a care task from this pet. Raises ValueError if it isn't here."""
         self.tasks.remove(task)
         task.pet_name = ""
+        task.pet = None
+
+    def complete_task(self, task: Task) -> Optional[Task]:
+        """Mark one of this pet's tasks done; returns its next occurrence.
+
+        Raises ValueError if the task isn't here. Returns None if it was
+        already complete.
+        """
+        if not any(task is existing for existing in self.tasks):
+            raise ValueError("task does not belong to this pet")
+        return task.mark_complete()
 
     def get_tasks(
         self, status: Optional[bool] = None, category: Optional[str] = None
@@ -148,6 +202,19 @@ class Owner:
         """Collect tasks across all of this owner's pets."""
         return [task for pet in self.pets for task in pet.get_tasks()]
 
+    def filter_tasks(
+        self,
+        pet_name: Optional[str] = None,
+        status: Optional[bool] = None,
+        category: Optional[str] = None,
+    ) -> list[Task]:
+        """Return tasks filtered by pet name, completion status and/or category.
+
+        Any filter left as None is ignored. status=True means completed.
+        """
+        pets = [p for p in self.pets if pet_name is None or p.name == pet_name]
+        return [t for p in pets for t in p.get_tasks(status=status, category=category)]
+
 
 @dataclass
 class ScheduledItem:
@@ -175,7 +242,8 @@ class Scheduler:
     def generate_plan(self) -> None:
         """Sort tasks by priority and fit them into the owner's available time.
 
-        1. Take every pending task from the owner's pets.
+        1. Take every pending task that is due (due_date on or before the plan
+           date) from the owner's pets.
         2. Pick tasks highest priority first (ties: earlier preferred time, then
            shorter) until available_minutes is used up. A task that doesn't fit
            is skipped and smaller ones are still tried.
@@ -188,14 +256,8 @@ class Scheduler:
         self.scheduled_items = []
         self.skipped_tasks = []
 
-        pending = [t for t in self.owner.get_all_tasks() if not t.completed]
-        pending.sort(
-            key=lambda t: (
-                -t.priority,
-                _to_minutes(t.preferred_time) if t.preferred_time else 24 * 60,
-                t.duration_minutes,
-            )
-        )
+        pending = self._due_tasks()
+        pending.sort(key=lambda t: (-t.priority, _time_key(t), t.duration_minutes))
 
         # Step 1: choose what fits in the time budget.
         budget = self.owner.available_minutes
@@ -256,6 +318,65 @@ class Scheduler:
             )
             for start, task, note in placed
         ]
+
+    def _due_tasks(self) -> list[Task]:
+        """Pending tasks whose due_date has arrived (recurring tasks wait their turn)."""
+        return [
+            t for t in self.owner.get_all_tasks()
+            if not t.completed and t.due_date <= self.date
+        ]
+
+    @staticmethod
+    def sort_by_time(tasks: list[Task]) -> list[Task]:
+        """Return a new list of tasks ordered by preferred time, earliest first.
+
+        Tasks without a preferred time go last. Sorting is stable, so tasks
+        with the same time keep their original relative order. The input list
+        is not modified.
+
+        Task validation requires zero-padded "HH:MM", so plain string
+        comparison is the same as chronological order.
+        """
+        # Zero-padded "HH:MM" strings sort chronologically as plain strings;
+        # "99:99" pushes tasks without a time to the end.
+        return sorted(tasks, key=lambda t: t.preferred_time or "99:99")
+
+    def detect_conflicts(self) -> list[str]:
+        """Warn about due tasks whose preferred-time windows overlap.
+
+        Each task occupies [preferred_time, preferred_time + duration). Timed
+        tasks are sorted by start, and each one is compared with the task that
+        ends latest so far, so a task that overlaps an earlier long task is
+        still caught (not just the one right before it). Works across pets
+        and within one pet. Tasks without a preferred time are ignored.
+
+        Returns a list of warning strings, one per conflict, labelled "same
+        pet" or "different pets" and "same time" or "overlap". The list is
+        empty when there are no conflicts. Never raises, so the caller can
+        show the warnings and carry on.
+        """
+        timed = self.sort_by_time([t for t in self._due_tasks() if t.preferred_time])
+        warnings: list[str] = []
+        latest: Optional[Task] = None
+        latest_end = 0
+        for task in timed:
+            start = _to_minutes(task.preferred_time)
+            if latest is not None and start < latest_end:
+                who = (
+                    f"same pet: {task.pet_name}"
+                    if task.pet_name == latest.pet_name
+                    else f"different pets: {task.pet_name} and {latest.pet_name}"
+                )
+                clash = "same time" if start == _to_minutes(latest.preferred_time) else "overlap"
+                warnings.append(
+                    f"WARNING ({who}) - {clash}: '{task.title}' at {task.preferred_time} "
+                    f"conflicts with '{latest.title}' at {latest.preferred_time} "
+                    f"(runs until {_to_hhmm(latest_end)})."
+                )
+            end = start + task.duration_minutes
+            if end > latest_end:
+                latest, latest_end = task, end
+        return warnings
 
     @staticmethod
     def _earliest_gap(busy: list[tuple[int, int]], duration: int, day_start: int) -> int:

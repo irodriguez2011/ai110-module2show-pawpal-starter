@@ -38,7 +38,12 @@ I also added a note to `generate_plan()` to clear its lists before running, so c
 **b. Tradeoffs**
 
 - Describe one tradeoff your scheduler makes.
+
+**Answer:** I chose to make the backend the single source of truth for priority levels. The priority names (`low`, `medium`, `high`) used to be defined twice: `PRIORITY_LABELS` in `pawpal_system.py` and `PRIORITY_VALUES` in `app.py`. I changed `app.py` to import `PRIORITY_LABELS` and build its dropdown lookup from it. The tradeoff is that the UI now depends on a backend constant instead of owning its own copy. I accepted that coupling in exchange for removing the risk of the two lists drifting apart. I compared this against four other small cleanups (for example, replacing `any(task is existing ...)` with `task in self.tasks`) and picked this one because it was the only one where the duplication could cause a bug.
+
 - Why is that tradeoff reasonable for this scenario?
+
+**Answer:** The UI already imports `Owner`, `Pet`, `Scheduler` and `Task` from the backend, so one more import does not add a new kind of dependency. Without the change, adding a priority level in the backend would leave the dropdown missing it, and nothing would crash or warn, so the mistake could go unnoticed. With the change, the order (low, medium, high) and the default selection stay the same, and adding a level only needs one edit. The cost is small, and the 18 tests still pass. I only checked the derived dictionary and that `app.py` compiles, and I did not click through the Streamlit UI, so that still needs a manual look.
 
 ---
 
